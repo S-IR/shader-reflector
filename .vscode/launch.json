@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "cppvsdbg",
+            "request": "launch",
+            "preLaunchTask": "Build",
+            "name": "Debug",
+            "program": "${workspaceFolder}/shader-reflector.exe",
+            "args": [
+                " hlsl/vert.hlsl"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
