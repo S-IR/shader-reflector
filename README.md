@@ -5,4 +5,3 @@ A shader reflection program that translates information from your hlsl shader in
 UTF8 only
 
 Notes:
-ignoring packoffset in naked structs

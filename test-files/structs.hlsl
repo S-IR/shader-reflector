@@ -53,4 +53,9 @@ struct OtherNumberTypes
      min16uint m;
      int64_t n;
      uint64_t o;
+     float pwda ;
+
+};
+struct Wrapper{
+    OtherNumberTypes nested;
 };

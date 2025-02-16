@@ -100,6 +100,8 @@ ShaderStructField :: struct {
 	name:                 string,
 	semanticModifier:     string,
 	type:                 ShaderType,
+
+	//typeMatrixDimensions[0] FOR NESTED STRUCT TYPES REPRESENTS THE INDEX OF THE STRUCT IN THE STRUCTS ARRAY
 	typeMatrixDimensions: [2]int,
 	typeModifier:         ShaderTypeModifier,
 	typeArrayDimensions:  [5]int,
@@ -259,7 +261,7 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 			skip_i(&i, utf8.rune_count(structWord), &fileStr)
 			continue
 		case currTag == .Struct && len(currStruct.name) == 0:
-			name, amountToSkip, valid := find_word_from_i(&fileStr, i)
+			name, amountToSkip, valid := find_word_from_i(&fileStr, i, {'{'})
 			if !valid {
 				skip_i(&i, amountToSkip, &fileStr)
 				panicflp("invalid struct name")
@@ -273,6 +275,11 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 			}
 
 			currStruct.name = name
+
+			if utf8string.at(&fileStr, i + amountToSkip) == '{' {
+				braceNestedLevel += 1
+				//we will skip the +1 for i due to the default for loop incrementation
+			}
 			currStruct.fields = make([dynamic]ShaderStructField)
 			skip_i(&i, amountToSkip, &fileStr)
 			continue
@@ -305,26 +312,26 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 		case braceNestedLevel == 1 && len(currStruct.name) > 0:
 			assert(currField.type == .MISSING)
 
-			//get the type
-			type, dims, typeSkip := get_type_of_field(&fileStr, i)
-			//if no type first check for the type modifier
-			if type == .MISSING {
-				typeModifier, modifierSkip := get_type_modifier_of_field(&fileStr, i)
-				if typeModifier == .MISSING {
-					panicflp("unknown type or type modifier : %s ", find_word_from_i(&fileStr, i))
-				}
-				currField.typeModifier = typeModifier
+			// type: ShaderType
+			// typeMatrixDimensions: [2]int
+			// typeSkip: int
 
-				skip_i(&i, modifierSkip, &fileStr)
-				skip_spaces(&fileStr, &i)
-				//then get the type
-				type, dims, typeSkip = get_type_of_field(&fileStr, i)
-				if type == .MISSING {
-					panicflp("unknown type  : %s ", find_word_from_i(&fileStr, i))
-				}
+
+			typeModifier, modifierSkip := get_type_modifier_of_field(&fileStr, i)
+
+
+			currField.typeModifier = typeModifier
+			skip_i(&i, modifierSkip, &fileStr)
+			skip_spaces(&fileStr, &i)
+
+			type, typeMatrixDimensions, typeSkip := get_type_of_field(&fileStr, i)
+			if type == .MISSING {
+				panicflp("unknown type : (%s) ", find_word_from_i(&fileStr, i))
 			}
+
+
 			currField.type = type
-			currField.typeMatrixDimensions = dims
+			currField.typeMatrixDimensions = typeMatrixDimensions
 			skip_i(&i, typeSkip, &fileStr)
 			skip_spaces(&fileStr, &i)
 
@@ -335,9 +342,11 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 				skip_i(&i, skipName, &fileStr)
 				panicflp("invalid struct field name")
 			}
+
 			currField.name = name
 			skip_i(&i, skipName, &fileStr)
 			skip_spaces(&fileStr, &i)
+
 
 			if utf8string.at(&fileStr, i) == '[' {
 				arraySizes, skipFromDimensions := find_type_array_dimensions(&fileStr, i)
@@ -377,8 +386,6 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 
 			}
 			if utf8string.at(&fileStr, i) != ';' {
-				fmt.printfln("rune (%v)", utf8string.at(&fileStr, i))
-				fmt.printfln("surrounding %v", utf8string.slice(&fileStr, i, i + 10))
 				panicflp("you forgot a semicolon for this struct field")
 			}
 
@@ -590,7 +597,6 @@ get_type_of_field :: proc(
 		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(doubleWord))
 		return .Double, dims, strings.rune_count(doubleWord) + skip
 
-
 	case is_substr_at_i(s, i, texture1DWord):
 		return .Texture1D, {}, strings.rune_count(texture1DWord)
 	case is_substr_at_i(s, i, texture1DArrayWord):
@@ -620,20 +626,28 @@ get_type_of_field :: proc(
 	case is_substr_at_i(s, i, rWTexture3DWord):
 		return .RWTexture3D, {}, strings.rune_count(rWTexture3DWord)
 
-	case is_nested_struct_type(s, i) != -1:
-		index := is_nested_struct_type(s, i)
-		return .NestedStruct, {index, 0}, utf8.rune_count(shaderStructs[index].name)
 
-
-	case:
-		return .MISSING, {}, 0
 	// panicflp("unknown type : %s ", find_word_from_i(s, i))
 	}
 
+	index := is_nested_struct_type(s, i)
+	fmt.printfln("hello world, (%v)", find_word_from_i(s, i))
+	if index != -1 {
+		return .NestedStruct, {index, 0}, utf8.rune_count(shaderStructs[index].name)
+	}
+	return .MISSING, {}, 0
 	is_nested_struct_type :: proc(s: ^utf8string.String, i: int) -> int {
-		for i in 0 ..< currShaderStructI {
-			currStrct := shaderStructs[i]
-			if is_substr_at_i(s, i, currStrct.name, true) do return i
+		for indexOfStrucs in 0 ..< currShaderStructI {
+			currStrct := shaderStructs[indexOfStrucs]
+			// fmt.printfln("currStrct.name (%v)", currStrct.name)
+			// fmt.printfln(
+			// 	"is_substr_at_i(s, i, currStrct.name, true) (%v)",
+			// 	is_substr_at_i(s, i, currStrct.name, true),
+			// )
+			// fmt.printfln("word at i (%v)", find_word_from_i(s, i))
+			// fmt.printfln("word at i - i+20 (%v)", utf8string.slice(s, i, i + 20))
+
+			if is_substr_at_i(s, i, currStrct.name, true) do return indexOfStrucs
 		}
 		return -1
 	}
