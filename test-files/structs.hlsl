@@ -58,4 +58,5 @@ struct OtherNumberTypes
 };
 struct Wrapper{
     OtherNumberTypes nested;
+    Output nested2[10];
 };

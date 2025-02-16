@@ -199,17 +199,31 @@ test_read_structs :: proc(t: ^testing.T) {
 
 
 	//struct 5
-	testing.expect_value(t, res.structs[5].name, "Wrapper")
-	testing.expect_value(t, len(res.structs[5].fields), 1)
+	{
+		testing.expect_value(t, res.structs[5].name, "Wrapper")
+		testing.expect_value(t, len(res.structs[5].fields), 2)
 
 
-	testing.expect_value(t, res.structs[5].fields[0].type, ShaderType.NestedStruct)
-	testing.expect_value(t, res.structs[5].fields[0].name, "nested")
-	index := res.structs[5].fields[0].typeMatrixDimensions[0]
-	testing.expect(t, index < len(res.structs))
-	testing.expect_value(t, res.structs[index].name, "OtherNumberTypes")
+		testing.expect_value(t, res.structs[5].fields[0].type, ShaderType.NestedStruct)
+		testing.expect_value(t, res.structs[5].fields[0].name, "nested")
+		index := res.structs[5].fields[0].nestedStructIndex
+		testing.expect(t, index != nil && index.(int) < len(res.structs))
+		testing.expect_value(t, res.structs[index.(int)].name, "OtherNumberTypes")
 
-	testing.expect_value(t, res.structs[0].fields[0].semanticModifier, "")
+		testing.expect_value(t, res.structs[5].fields[0].semanticModifier, "")
 
+
+		testing.expect_value(t, res.structs[5].fields[1].type, ShaderType.NestedStruct)
+		testing.expect_value(t, res.structs[5].fields[1].name, "nested2")
+		index2 := res.structs[5].fields[1].nestedStructIndex
+
+		testing.expect(t, index2 != nil && index.(int) < len(res.structs))
+		testing.expect_value(t, index2, 1)
+		testing.expect_value(t, res.structs[index2.(int)].name, "Output")
+
+		testing.expect_value(t, res.structs[5].fields[0].semanticModifier, "")
+
+
+	}
 
 }
