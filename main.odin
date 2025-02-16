@@ -42,11 +42,58 @@ ShaderTypeModifier :: enum {
 	MISSING,
 	RowMajor,
 	ColumnMajor,
+	Static,
+	//interpolation values
+	Nointerpolation,
+	Linear,
+	Centroid,
+	NoPerspective,
+	Sample,
+
+	//if it is a nested struct use the "matrix dimensions"[0] as a way to keep track of the index of the struct that's nested
 }
+rowMajorWord :: "row_major"
+columnMajorWord :: "column_major"
+nointerpolationWord :: "nointerpolation"
+sampleWord :: "sample"
+centroidWord :: "centroid"
+linearWord :: "linear"
+staticWord :: "static"
+noPerspectiveWord :: "noperspective"
+
 ShaderType :: enum {
 	MISSING,
 	Float,
 	Matrix,
+	Bool,
+	Int,
+	Uint,
+	Half,
+	Double,
+	Min16float,
+	Min16int,
+	Min12int,
+	Min16uint,
+	Int64_t,
+	Uint64_t,
+
+
+	//texture types
+	Texture1D,
+	Texture1DArray,
+	Texture2D,
+	Texture2DArray,
+	Texture3D,
+	TextureCube,
+	TextureCubeArray,
+	Texture2DMS,
+	Texture2DMSArray,
+	RWTexture1D,
+	RWTexture1DArray,
+	RWTexture2D,
+	RWTexture2DArray,
+	RWTexture3D,
+	NestedStruct,
 }
 
 ShaderStructField :: struct {
@@ -74,12 +121,39 @@ MAX_FIELD_NAME :: 36
 
 structWord :: "struct"
 
-float4x4Word :: "float4x4"
 floatWord :: "float"
 matrixWord :: "matix"
 
-rowMajorWord :: "row_major"
-columnMajorWord :: "column_major"
+boolWord :: "bool"
+intWord :: "int"
+uintWord :: "uint"
+dwordWord :: "dword"
+halfWord :: "half"
+doubleWord :: "double"
+min16floatWord :: "min16float"
+min16intWord :: "min16int"
+min12intWord :: "min12int"
+min16uintWord :: "min16uint"
+int64_tWord :: "int64_t"
+uint64_tWord :: "uint64_t"
+
+texture1DWord :: "texture1D"
+texture1DArrayWord :: "texture1DArray"
+texture2DWord :: "texture2D"
+texture2DArrayWord :: "texture2DArray"
+texture3DWord :: "texture3D"
+textureCubeWord :: "textureCube"
+textureCubeArrayWord :: "textureCubeArray"
+texture2DMSWord :: "texture2DMS"
+texture2DMSArrayWord :: "texture2DMSArray"
+rWTexture1DWord :: "rWTexture1D"
+rWTexture1DArrayWord :: "rWTexture1DArray"
+rWTexture2DWord :: "rWTexture2D"
+rWTexture2DArrayWord :: "rWTexture2DArray"
+rWTexture3DWord :: "rWTexture3D"
+
+packoffsetWord :: "packoffset"
+
 
 line := 1
 pos := 0
@@ -102,6 +176,8 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 	if !fileExists {
 		panicf("invalid shader path:  %v", args.path)
 	}
+
+
 	defer delete(file)
 
 
@@ -254,7 +330,7 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 
 
 			//get name
-			name, skipName, valid := find_word_from_i(&fileStr, i, {'['})
+			name, skipName, valid := find_word_from_i(&fileStr, i, {'[', ':'})
 			if !valid {
 				skip_i(&i, skipName, &fileStr)
 				panicflp("invalid struct field name")
@@ -276,6 +352,21 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 				skip_i(&i, 1, &fileStr)
 				skip_spaces(&fileStr, &i)
 				semantic, skipSemantic, valid := find_word_from_i(&fileStr, i)
+
+				//ignore pack offsets in naked structs
+				if semantic == packoffsetWord {
+					skip_i(&i, utf8.rune_count(packoffsetWord), &fileStr)
+					count := 0
+					maxRounds := 10
+					for count < maxRounds &&
+					    i < utf8string.len(&fileStr) &&
+					    utf8string.at(&fileStr, i + count) != ')' {
+						count += 1
+					}
+					skip_i(&i, 1, &fileStr)
+				}
+
+
 				if !valid {
 					skip_i(&i, skipSemantic, &fileStr)
 					panicflp("invalid struct semantic name")
@@ -287,7 +378,6 @@ start_search :: proc(args: Args) -> ShaderFileInfo {
 			}
 			if utf8string.at(&fileStr, i) != ';' {
 				fmt.printfln("rune (%v)", utf8string.at(&fileStr, i))
-
 				fmt.printfln("surrounding %v", utf8string.slice(&fileStr, i, i + 10))
 				panicflp("you forgot a semicolon for this struct field")
 			}
@@ -336,11 +426,35 @@ validate_struct :: proc(currStruct: ShaderStruct) {
 
 
 valid_struct_field :: proc(field: ShaderStructField) -> bool {
-	ValidFloatModifiers: []ShaderTypeModifier : {.MISSING}
+	ValidArithmeticModifiers: []ShaderTypeModifier : {
+		.MISSING,
+		.Static,
+		.Nointerpolation,
+		.Linear,
+		.Centroid,
+		.NoPerspective,
+		.Sample,
+	}
 	ValidMatrixModifier: []ShaderTypeModifier : {.RowMajor, .MISSING, .ColumnMajor}
 
 
-	if field.type == .Float {
+	ArithmeticList: []ShaderType : []ShaderType {
+		.Float,
+		.Bool,
+		.Int,
+		.Uint,
+		.Half,
+		.Double,
+		.Min16float,
+		.Min16int,
+		.Min12int,
+		.Min16uint,
+		.Int64_t,
+		.Uint64_t,
+	}
+	if field.type == .Matrix && !slice.contains(ValidMatrixModifier, field.typeModifier) {
+		return false
+	} else if slice.contains(ArithmeticList, field.type) {
 		assert(field.typeMatrixDimensions[0] > 0)
 		if field.typeMatrixDimensions[0] > 4 ||
 		   field.typeMatrixDimensions[1] > 4 ||
@@ -354,14 +468,12 @@ valid_struct_field :: proc(field: ShaderStructField) -> bool {
 			if !slice.contains(ValidMatrixModifier, field.typeModifier) {
 				return false
 			}
+		} else {
+			if !slice.contains(ValidArithmeticModifiers, field.typeModifier) do return false
 		}
 
-		if !slice.contains(ValidFloatModifiers, field.typeModifier) do return false
 	}
 
-	if field.type == .Matrix && !slice.contains(ValidMatrixModifier, field.typeModifier) {
-		return false
-	}
 
 	return true
 
@@ -382,6 +494,19 @@ get_type_modifier_of_field :: proc(
 
 	case is_substr_at_i(s, i, columnMajorWord):
 		return .ColumnMajor, strings.rune_count(columnMajorWord)
+	case is_substr_at_i(s, i, nointerpolationWord):
+		return .Nointerpolation, strings.rune_count(nointerpolationWord)
+	case is_substr_at_i(s, i, centroidWord):
+		return .Centroid, strings.rune_count(centroidWord)
+	case is_substr_at_i(s, i, sampleWord):
+		return .Sample, strings.rune_count(sampleWord)
+	case is_substr_at_i(s, i, noPerspectiveWord):
+		return .NoPerspective, strings.rune_count(noPerspectiveWord)
+	case is_substr_at_i(s, i, linearWord):
+		return .Linear, strings.rune_count(linearWord)
+
+	case is_substr_at_i(s, i, staticWord):
+		return .Static, strings.rune_count(staticWord)
 	case:
 		return .MISSING, 0
 	// panicflp("unknown type : %s ", find_word_from_i(s, i))
@@ -402,6 +527,32 @@ get_type_of_field :: proc(
 	switch true {
 
 
+	case is_substr_at_i(s, i, min16floatWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(min16floatWord))
+		return .Min16float, dims, strings.rune_count(min16floatWord) + skip
+	case is_substr_at_i(s, i, min16intWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(min16intWord))
+		return .Min16int, dims, strings.rune_count(min16intWord) + skip
+
+	case is_substr_at_i(s, i, min12intWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(min12intWord))
+		return .Min12int, dims, strings.rune_count(min12intWord) + skip
+
+
+	case is_substr_at_i(s, i, min16uintWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(min16uintWord))
+		return .Min16uint, dims, strings.rune_count(min16uintWord) + skip
+
+
+	case is_substr_at_i(s, i, int64_tWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(int64_tWord))
+		return .Int64_t, dims, strings.rune_count(int64_tWord) + skip
+
+	case is_substr_at_i(s, i, uint64_tWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(uint64_tWord))
+		return .Uint64_t, dims, strings.rune_count(uint64_tWord) + skip
+
+
 	case is_substr_at_i(s, i, floatWord):
 		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(floatWord))
 		return .Float, dims, strings.rune_count(floatWord) + skip
@@ -411,11 +562,81 @@ get_type_of_field :: proc(
 		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(matrixWord))
 		return .Matrix, dims, strings.rune_count(matrixWord) + skip
 
+	case is_substr_at_i(s, i, boolWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(boolWord))
+		return .Bool, dims, strings.rune_count(boolWord) + skip
+
+
+	case is_substr_at_i(s, i, intWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(intWord))
+		return .Int, dims, strings.rune_count(intWord) + skip
+
+
+	case is_substr_at_i(s, i, uintWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(uintWord))
+		return .Uint, dims, strings.rune_count(intWord) + skip
+
+
+	case is_substr_at_i(s, i, dwordWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(dwordWord))
+		return .Uint, dims, strings.rune_count(dwordWord) + skip
+
+	case is_substr_at_i(s, i, halfWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(halfWord))
+		return .Half, dims, strings.rune_count(halfWord) + skip
+
+
+	case is_substr_at_i(s, i, doubleWord):
+		dims, skip := get_type_matrix_dimensions(s, i + utf8.rune_count(doubleWord))
+		return .Double, dims, strings.rune_count(doubleWord) + skip
+
+
+	case is_substr_at_i(s, i, texture1DWord):
+		return .Texture1D, {}, strings.rune_count(texture1DWord)
+	case is_substr_at_i(s, i, texture1DArrayWord):
+		return .Texture1DArray, {}, strings.rune_count(texture1DArrayWord)
+	case is_substr_at_i(s, i, texture2DWord):
+		return .Texture2D, {}, strings.rune_count(texture2DWord)
+	case is_substr_at_i(s, i, texture2DArrayWord):
+		return .Texture2DArray, {}, strings.rune_count(texture2DArrayWord)
+	case is_substr_at_i(s, i, texture3DWord):
+		return .Texture3D, {}, strings.rune_count(texture3DWord)
+	case is_substr_at_i(s, i, textureCubeWord):
+		return .TextureCube, {}, strings.rune_count(textureCubeWord)
+	case is_substr_at_i(s, i, textureCubeArrayWord):
+		return .TextureCubeArray, {}, strings.rune_count(textureCubeArrayWord)
+	case is_substr_at_i(s, i, texture2DMSWord):
+		return .Texture2DMS, {}, strings.rune_count(texture2DMSWord)
+	case is_substr_at_i(s, i, texture2DMSArrayWord):
+		return .Texture2DMSArray, {}, strings.rune_count(texture2DMSArrayWord)
+	case is_substr_at_i(s, i, rWTexture1DWord):
+		return .RWTexture1D, {}, strings.rune_count(rWTexture1DWord)
+	case is_substr_at_i(s, i, rWTexture1DArrayWord):
+		return .RWTexture1DArray, {}, strings.rune_count(rWTexture1DArrayWord)
+	case is_substr_at_i(s, i, rWTexture2DWord):
+		return .RWTexture2D, {}, strings.rune_count(rWTexture2DWord)
+	case is_substr_at_i(s, i, rWTexture2DArrayWord):
+		return .RWTexture2DArray, {}, strings.rune_count(rWTexture2DArrayWord)
+	case is_substr_at_i(s, i, rWTexture3DWord):
+		return .RWTexture3D, {}, strings.rune_count(rWTexture3DWord)
+
+	case is_nested_struct_type(s, i) != -1:
+		index := is_nested_struct_type(s, i)
+		return .NestedStruct, {index, 0}, utf8.rune_count(shaderStructs[index].name)
+
+
 	case:
 		return .MISSING, {}, 0
 	// panicflp("unknown type : %s ", find_word_from_i(s, i))
 	}
 
+	is_nested_struct_type :: proc(s: ^utf8string.String, i: int) -> int {
+		for i in 0 ..< currShaderStructI {
+			currStrct := shaderStructs[i]
+			if is_substr_at_i(s, i, currStrct.name, true) do return i
+		}
+		return -1
+	}
 
 }
 
@@ -580,9 +801,18 @@ find_word_from_i :: proc(
 	}
 	return utf8string.slice(s, i, j), j - i, true
 }
-is_substr_at_i :: proc(s: ^utf8string.String, i: int, subStr: string) -> bool {
+is_substr_at_i :: proc(
+	s: ^utf8string.String,
+	i: int,
+	subStr: string,
+	requireSpaceAtTheEnd := false,
+) -> bool {
 	numOfRunes := utf8.rune_count(subStr)
 	if i + numOfRunes >= utf8string.len(s) do return false
+
+	if requireSpaceAtTheEnd {
+		if !unicode.is_space(utf8string.at(s, i + numOfRunes)) do return false
+	}
 	return utf8string.slice(s, i, i + numOfRunes) == subStr
 }
 is_end_of_name :: proc(s: ^utf8string.String, j: int, extraStopAts: []rune = {}) -> bool {

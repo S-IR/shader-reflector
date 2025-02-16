@@ -37,3 +37,20 @@ struct ArrayStruct
     float2x2 a[1][2][3]  : TEXCOORD0;
     float4x4 b[10][1] : SV_Depth;
 };
+
+struct OtherNumberTypes
+{
+    nointerpolation int a: TEXCOORD2; 
+    linear bool b;
+    static int c;
+    centroid uint d;
+    noperspective dword e;
+    sample half f;
+     float g;
+     double h;
+     min16float i;
+     min16int k;
+     min16uint m;
+     int64_t n;
+     uint64_t o;
+};
